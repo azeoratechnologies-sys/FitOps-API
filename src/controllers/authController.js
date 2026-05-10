@@ -96,7 +96,7 @@ async function registerUser(req, res) {
   const {
     businessName, storeName, gstTaxNumber,
     mobileNo, email, address, country,
-    username, password, referralCode
+    username, password, referralCode, deviceId
   } = req.body;
 
   try {
@@ -112,7 +112,8 @@ async function registerUser(req, res) {
       p_country: country,
       p_username: username,
       p_password_hash: hashedPassword,
-      p_referral_code: referralCode
+      p_referral_code: referralCode,
+      p_device_id: deviceId
     });
 
     if (error) throw error;
@@ -164,48 +165,55 @@ async function loginUser(req, res) {
   const ip = req.ip || req.headers['x-forwarded-for'];
 
   try {
-    const { data, error } = await supabase
+    // We'll use the client_login RPC for secure authentication and device locking
+    // Note: client_login expects a password_hash, but we are using bcrypt in JS.
+    // However, the database setup usually has its own hashing or expects the hash.
+    // In this specific system, the JS controller handles bcrypt.
+    
+    // Step 1: Find the user first to get the hash
+    const { data: user, error: userError } = await supabase
       .from('clients')
       .select('*')
-      .eq('username', username)
+      .or(`username.eq.${username},mobile_no.eq.${username}`)
       .single();
 
-    if (error || !data) {
-      // Log failure (client_id unknown)
+    if (userError || !user) {
       await supabase.from('failed_logins').insert({ ip_address: ip });
       return res.status(401).json({ error: 'Invalid username or password' });
     }
 
-    const isValid = await bcrypt.compare(password, data.password_hash);
-    
+    // Step 2: Verify password via bcrypt
+    const isValid = await bcrypt.compare(password, user.password_hash);
     if (!isValid) {
-      // Log failure
       await supabase.from('failed_logins').insert({ 
-        client_id: data.client_id, 
+        client_id: user.client_id, 
         ip_address: ip 
       });
       return res.status(401).json({ error: 'Invalid username or password' });
     }
 
-    // 1. Log Successful Login
+    // Step 3: Now use the client_login RPC (or a simplified version) to verify Device ID
+    const { data: authResult, error: authError } = await supabase.rpc('client_login', {
+      p_username: username,
+      p_password_hash: user.password_hash, // Passing the hash because it matches what's in DB
+      p_device_id: deviceId
+    });
+
+    if (authError) throw authError;
+
+    if (authResult.success === false) {
+      return res.status(403).json({ error: authResult.message });
+    }
+
+    // 4. Log Successful Login Audit
     await supabase.from('login_audit').insert({
-      client_id: data.client_id,
+      client_id: user.client_id,
       ip_address: ip,
       user_agent: req.headers['user-agent'],
       device_id: deviceId
     });
 
-    // 2. Track Device (for single device rule)
-    if (deviceId) {
-      await supabase.from('client_devices').upsert({
-        client_id: data.client_id,
-        device_token: deviceId,
-        platform: platform || 'mobile',
-        last_seen: new Date()
-      }, { onConflict: 'device_token' });
-    }
-
-    res.json({ success: true, user: data });
+    res.json({ success: true, user: user });
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
@@ -217,6 +225,24 @@ async function loginUser(req, res) {
  *   get:
  *     summary: Get subscription details for a client
  *     tags: [Subscription]
+ *     parameters:
+ *       - in: path
+ *         name: clientId
+ *         required: true
+ *         schema:
+ *           type: integer
+ *         description: The unique ID of the client
+ *     responses:
+ *       200:
+ *         description: Success
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *       404:
+ *         description: Not Found
+ *       500:
+ *         description: Server Error
  */
 async function getSubscription(req, res) {
   const { clientId } = req.params;
@@ -224,21 +250,22 @@ async function getSubscription(req, res) {
     // 1. Fetch Client Basic Info
     const { data: client, error: clientErr } = await supabase
       .from('clients')
-      .select('client_id, business_code, business_name, expiry_date, wallet_balance, created_at')
+      .select('client_id, business_code, business_name, expiry_date, wallet_balance, register_date')
       .eq('client_id', clientId)
       .single();
 
     if (clientErr) throw clientErr;
 
-    // 2. Fetch Active Subscription
-    const { data: sub } = await supabase
+    // 2. Fetch Active Subscription (Don't use .single() to avoid 404 if no sub exists)
+    const { data: subs, error: subErr } = await supabase
       .from('client_subscriptions')
       .select('*, subscription_plans(*)')
       .eq('client_id', clientId)
       .eq('is_active', true)
       .order('expiry_date', { ascending: false })
-      .limit(1)
-      .single();
+      .limit(1);
+
+    const sub = (subs && subs.length > 0) ? subs[0] : null;
 
     // 3. Fetch Recent Payments
     const { data: payments } = await supabase
@@ -259,11 +286,12 @@ async function getSubscription(req, res) {
     res.json({
       client,
       activeSubscription: sub,
-      paymentHistory: payments,
-      walletHistory: wallet
+      paymentHistory: payments || [],
+      walletHistory: wallet || []
     });
   } catch (error) {
-    res.status(404).json({ error: 'Client or Subscription not found' });
+    console.error('Subscription Fetch Error:', error);
+    res.status(500).json({ error: error.message || 'Server error fetching subscription' });
   }
 }
 
@@ -300,9 +328,119 @@ async function adminRenew(req, res) {
     });
 
     if (error) throw error;
+    
+    // Update clients table with new expiry date
+    if (data) {
+      await supabase.from('clients').update({ expiry_date: data }).eq('client_id', clientId);
+    }
+
     res.json({ success: true, newExpiry: data });
   } catch (error) {
     res.status(400).json({ error: error.message });
+  }
+}
+
+async function getPlans(req, res) {
+  const { country } = req.query;
+  try {
+    let query = supabase
+      .from('subscription_plans')
+      .select('*')
+      .eq('is_active', true)
+      .is('deleted_at', null);
+
+    if (country) {
+      query = query.eq('country', country);
+    }
+
+    const { data, error } = await query.order('duration_days', { ascending: true });
+
+    if (error) throw error;
+    res.json(data);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+}
+
+async function createLead(req, res) {
+  try {
+    const { data, error } = await supabase
+      .from('leads')
+      .insert([req.body])
+      .select();
+
+    if (error) throw error;
+    res.json({ success: true, data: data[0] });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+}
+
+// --- Suggestions Logic ---
+
+async function submitSuggestion(req, res) {
+  try {
+    const { clientId, suggestionText } = req.body;
+    const { data, error } = await supabase
+      .from('client_suggestions')
+      .insert([{ client_id: clientId, suggestion_text: suggestionText }])
+      .select();
+
+    if (error) throw error;
+    res.json({ success: true, data: data[0] });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+}
+
+async function getClientSuggestions(req, res) {
+  try {
+    const { clientId } = req.params;
+    const { data, error } = await supabase
+      .from('client_suggestions')
+      .select('*')
+      .eq('client_id', clientId)
+      .order('created_at', { ascending: false });
+
+    if (error) throw error;
+    res.json(data);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+}
+
+async function getAllSuggestions(req, res) {
+  try {
+    const { data, error } = await supabase
+      .from('client_suggestions')
+      .select('*, clients(business_name, mobile_no)')
+      .order('created_at', { ascending: false });
+
+    if (error) throw error;
+    res.json(data);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+}
+
+async function replyToSuggestion(req, res) {
+  try {
+    const { id } = req.params;
+    const { replyText } = req.body;
+    const { data, error } = await supabase
+      .from('client_suggestions')
+      .update({ 
+        reply_text: replyText, 
+        status: 'REPLIED', 
+        replied_at: new Date().toISOString() 
+      })
+      .eq('id', id)
+      .select();
+
+    if (error) throw error;
+    res.json({ success: true, data: data[0] });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
   }
 }
 
@@ -312,5 +450,11 @@ module.exports = {
   loginUser,
   getSubscription,
   getCountryRules,
-  adminRenew
+  adminRenew,
+  getPlans,
+  createLead,
+  submitSuggestion,
+  getClientSuggestions,
+  getAllSuggestions,
+  replyToSuggestion
 };

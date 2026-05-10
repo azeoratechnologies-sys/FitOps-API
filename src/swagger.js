@@ -15,6 +15,10 @@ const options = {
         description: 'Dev Tunnel server',
       },
       {
+        url: 'https://fitops-api.onrender.com',
+        description: 'Production server',
+      },
+      {
         url: 'http://localhost:8081',
         description: 'Development server',
       },

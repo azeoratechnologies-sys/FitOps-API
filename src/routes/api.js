@@ -9,4 +9,16 @@ router.get('/config/country-rules', authController.getCountryRules);
 router.get('/subscription/:clientId', authController.getSubscription);
 router.post('/admin/renew', authController.adminRenew);
 
+// Plans
+router.get('/plans', authController.getPlans);
+
+// Leads
+router.post('/leads', authController.createLead);
+
+// Suggestions
+router.post('/suggestions', authController.submitSuggestion);
+router.get('/suggestions/:clientId', authController.getClientSuggestions);
+router.get('/admin/suggestions', authController.getAllSuggestions);
+router.post('/admin/suggestions/:id/reply', authController.replyToSuggestion);
+
 module.exports = router;

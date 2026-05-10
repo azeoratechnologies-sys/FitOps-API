@@ -28,5 +28,5 @@ app.listen(PORT, '0.0.0.0', async () => {
   
   // Startup Check: Verify Email Configuration
   console.log('Checking Email Configuration...');
-  await sendWelcomeEmail('test@fitops.com', 'Startup Check');
+  await sendWelcomeEmail('azeoratechnologies@gmail.com', 'Startup Check');
 });
