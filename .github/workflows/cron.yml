@@ -9,4 +9,4 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Ping API
-        run: curl https://azeoraadmin-api.onrender.com/health
+        run: curl https://fitops-api.onrender.com/api-docs/
