@@ -3,10 +3,12 @@ name: Keep Render Awake
 on:
   schedule:
     - cron: '*/10 * * * *'
+  workflow_dispatch:
 
 jobs:
   ping:
     runs-on: ubuntu-latest
+
     steps:
       - name: Ping API
-        run: curl https://fitops-api.onrender.com/api-docs/
+        run: curl --fail https://fitops-api.onrender.com/
