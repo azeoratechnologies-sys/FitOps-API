@@ -4,8 +4,8 @@ const supabase = require('./supabase');
 async function sendWelcomeEmail(toEmail, businessName) {
   try {
     // Debug: Check if we can access 'clients' table
-    const { data: clientsData, error: clientsError } = await supabase.from('clients').select('count', { count: 'exact', head: true });
-    console.log('Access to clients table - Error:', clientsError?.message, 'Data:', clientsData);
+    const { count, error: clientsError } = await supabase.from('clients').select('*', { count: 'exact', head: true });
+    console.log('Access to clients table - Error:', clientsError?.message, 'Count:', count);
 
     // Debug: Fetch all config rows to see what exists
     const { data: allConfigs, error: allConfigsError } = await supabase.from('system_config').select('*');
@@ -24,7 +24,13 @@ async function sendWelcomeEmail(toEmail, businessName) {
     }
 
     const config = data.config_value;
-    if (!config.enabled) {
+    
+    // Allow local overrides via .env for testing
+    const user = process.env.EMAIL_USER || config.user;
+    const pass = process.env.EMAIL_PASS || config.pass;
+    const from = process.env.EMAIL_FROM || config.from;
+
+    if (!config.enabled && !process.env.EMAIL_USER) {
       console.log('Email notifications are disabled in config');
       return;
     }
@@ -35,8 +41,8 @@ async function sendWelcomeEmail(toEmail, businessName) {
       port: config.port,
       secure: config.port === 465, // true for 465, false for others
       auth: {
-        user: config.user,
-        pass: config.pass,
+        user: user,
+        pass: pass,
       },
     });
 
@@ -83,7 +89,7 @@ async function sendWelcomeEmail(toEmail, businessName) {
 
     // 4. Send Email
     await transporter.sendMail({
-      from: config.from,
+      from: from,
       to: toEmail,
       subject: `Welcome to FitOps, ${businessName}! 🚀`,
       html: htmlContent,

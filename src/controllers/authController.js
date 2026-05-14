@@ -213,6 +213,15 @@ async function loginUser(req, res) {
       device_id: deviceId
     });
 
+    // 5. Update Last Usage (Non-blocking)
+    try {
+      await supabase.from('clients')
+        .update({ last_usage: new Date().toISOString() })
+        .eq('client_id', user.client_id);
+    } catch (uErr) {
+      console.error('Failed to update last_usage during login:', uErr.message);
+    }
+
     res.json({ success: true, user: user });
   } catch (error) {
     res.status(500).json({ error: error.message });
@@ -255,6 +264,15 @@ async function getSubscription(req, res) {
       .single();
 
     if (clientErr) throw clientErr;
+
+    // 1.5 Update Last Usage (Heartbeat, Non-blocking)
+    try {
+      await supabase.from('clients')
+        .update({ last_usage: new Date().toISOString() })
+        .eq('client_id', clientId);
+    } catch (uErr) {
+      console.error('Failed to update last_usage during heartbeat:', uErr.message);
+    }
 
     // 2. Fetch Active Subscription (Don't use .single() to avoid 404 if no sub exists)
     const { data: subs, error: subErr } = await supabase
@@ -444,6 +462,19 @@ async function replyToSuggestion(req, res) {
   }
 }
 
+async function updateLastUsage(req, res) {
+  try {
+    const { id } = req.params;
+    await supabase.from('clients')
+      .update({ last_usage: new Date().toISOString() })
+      .eq('client_id', id);
+    res.json({ success: true });
+  } catch (error) {
+    console.error('Manual last_usage update failed:', error.message);
+    res.status(500).json({ error: error.message });
+  }
+}
+
 module.exports = {
   checkUnique,
   registerUser,
@@ -456,5 +487,6 @@ module.exports = {
   submitSuggestion,
   getClientSuggestions,
   getAllSuggestions,
-  replyToSuggestion
+  replyToSuggestion,
+  updateLastUsage
 };

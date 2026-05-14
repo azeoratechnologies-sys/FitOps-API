@@ -20,5 +20,6 @@ router.post('/suggestions', authController.submitSuggestion);
 router.get('/suggestions/:clientId', authController.getClientSuggestions);
 router.get('/admin/suggestions', authController.getAllSuggestions);
 router.post('/admin/suggestions/:id/reply', authController.replyToSuggestion);
+router.post('/clients/:id/last-usage', authController.updateLastUsage);
 
 module.exports = router;
