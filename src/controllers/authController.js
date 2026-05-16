@@ -125,8 +125,8 @@ async function registerUser(req, res) {
       .eq('client_id', data)
       .single();
 
-    // Send Real Welcome Email
-    await sendWelcomeEmail(email, businessName);
+    // Send Welcome Email (Non-blocking to avoid timeouts)
+    sendWelcomeEmail(email, businessName).catch(e => console.error('Background email failed:', e));
 
     res.json({ 
       success: true, 

@@ -44,6 +44,8 @@ async function sendWelcomeEmail(toEmail, businessName) {
         user: user,
         pass: pass,
       },
+      connectionTimeout: 5000, // 5 seconds
+      socketTimeout: 5000,     // 5 seconds
     });
 
     // 3. Define HTML Template
