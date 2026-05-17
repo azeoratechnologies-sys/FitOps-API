@@ -122,11 +122,11 @@ BEGIN
     v_expiry := NOW() + INTERVAL '15 days';
 
     INSERT INTO public.clients (
-        business_code, business_name, store_name, mobile_no, 
+        business_code, business_name, store_name, gst_tax_number, mobile_no, 
         email, address, country, business_type, username, password_hash, 
         referral_code, expiry_date
     ) VALUES (
-        v_business_code, p_business_name, p_store_name, p_mobile_no, 
+        v_business_code, p_business_name, p_store_name, p_gst_tax_number, p_mobile_no, 
         p_email, p_address, p_country, p_business_type, COALESCE(p_username, p_mobile_no), 
         p_password_hash, p_referral_code, v_expiry
     ) RETURNING client_id INTO v_client_id;

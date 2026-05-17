@@ -96,10 +96,27 @@ async function registerUser(req, res) {
   const {
     businessName, storeName, gstTaxNumber,
     mobileNo, email, address, country,
-    username, password, referralCode, deviceId
+    username, password, referralCode, deviceId,
+    businessType, countryCode
   } = req.body;
 
   try {
+    // 1. Restrict if this device is already registered
+    if (deviceId && deviceId.trim() !== '' && deviceId !== 'unknown') {
+      const { data: existingDevice, error: deviceCheckError } = await supabase
+        .from('clients')
+        .select('client_id')
+        .eq('device_id', deviceId)
+        .is('deleted_at', null)
+        .limit(1);
+
+      if (deviceCheckError) throw deviceCheckError;
+
+      if (existingDevice && existingDevice.length > 0) {
+        return res.status(400).json({ error: 'This device is already registered under another account.' });
+      }
+    }
+
     const hashedPassword = await bcrypt.hash(password, 10);
     
     const { data, error } = await supabase.rpc('register_client', {
@@ -110,13 +127,29 @@ async function registerUser(req, res) {
       p_email: email,
       p_address: address,
       p_country: country,
+      p_business_type: businessType || 'Tailoring',
       p_username: username,
       p_password_hash: hashedPassword,
-      p_referral_code: referralCode,
-      p_device_id: deviceId
+      p_referral_code: referralCode
     });
 
     if (error) throw error;
+
+    // 2. Directly update additional columns to guarantee storage
+    const updatePayload = {
+      business_type: businessType || 'Tailoring',
+      country_code: countryCode || '+91',
+      device_id: deviceId
+    };
+
+    const { error: updateError } = await supabase
+      .from('clients')
+      .update(updatePayload)
+      .eq('client_id', data);
+
+    if (updateError) {
+      console.error('Failed to update extra columns on client registration:', updateError.message);
+    }
 
     // Fetch the generated business code for the new client
     const { data: newClient } = await supabase
@@ -256,14 +289,20 @@ async function loginUser(req, res) {
 async function getSubscription(req, res) {
   const { clientId } = req.params;
   try {
-    // 1. Fetch Client Basic Info
-    const { data: client, error: clientErr } = await supabase
+    // 1. Fetch Client Basic Info (Limit 1 to avoid coercion error)
+    const { data: clients, error: clientErr } = await supabase
       .from('clients')
       .select('client_id, business_code, business_name, expiry_date, wallet_balance, register_date')
       .eq('client_id', clientId)
-      .single();
+      .limit(1);
 
     if (clientErr) throw clientErr;
+
+    if (!clients || clients.length === 0) {
+      return res.status(404).json({ error: 'Client subscription data not available. Please contact support.' });
+    }
+
+    const client = clients[0];
 
     // 1.5 Update Last Usage (Heartbeat, Non-blocking)
     try {
