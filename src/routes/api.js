@@ -2,12 +2,19 @@ const express = require('express');
 const router = express.Router();
 const authController = require('../controllers/authController');
 
+const paymentController = require('../controllers/paymentController');
+
 router.post('/check-unique', authController.checkUnique);
 router.post('/register', authController.registerUser);
 router.post('/login', authController.loginUser);
 router.get('/config/country-rules', authController.getCountryRules);
 router.get('/subscription/:clientId', authController.getSubscription);
 router.post('/admin/renew', authController.adminRenew);
+
+// Payments
+router.post('/payments/renew', paymentController.renewAfterPayment);
+router.get('/payments/config', paymentController.getPaymentConfig);
+router.post('/payments/validate-coupon', paymentController.validateCoupon);
 
 // Plans
 router.get('/plans', authController.getPlans);

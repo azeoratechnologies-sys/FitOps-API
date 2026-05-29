@@ -142,7 +142,7 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
--- Renew Subscription (Fixed: Updates plan_id)
+-- Renew Subscription (Updated with Coupon Support)
 CREATE OR REPLACE FUNCTION public.renew_subscription(
     p_client_id INT,
     p_plan_id   INT,
@@ -156,27 +156,64 @@ DECLARE
   v_current_exp TIMESTAMP;
   v_new_exp TIMESTAMP;
   v_amount NUMERIC;
+  v_discount NUMERIC := 0;
 BEGIN
+  -- 1. Get Plan
   SELECT * INTO v_plan FROM subscription_plans WHERE plan_id = p_plan_id;
   IF NOT FOUND THEN RAISE EXCEPTION 'Plan not found'; END IF;
 
+  -- 2. Handle Coupon
+  IF p_coupon_id IS NOT NULL THEN
+    -- Check if already used
+    IF EXISTS (SELECT 1 FROM coupon_usage WHERE client_id = p_client_id AND coupon_id = p_coupon_id) THEN
+      RAISE EXCEPTION 'Coupon already used';
+    END IF;
+
+    -- Get Coupon Details
+    SELECT * INTO v_coupon FROM coupons WHERE coupon_id = p_coupon_id AND is_active = TRUE AND NOW() BETWEEN valid_from AND valid_to;
+    IF NOT FOUND THEN RAISE EXCEPTION 'Coupon invalid or expired'; END IF;
+
+    -- Calculate Discount
+    IF v_coupon.discount_type = 'PERCENT' THEN
+      v_discount := (v_plan.price * v_coupon.discount_value) / 100;
+    ELSE
+      v_discount := v_coupon.discount_value;
+    END IF;
+
+    -- Record Usage
+    INSERT INTO coupon_usage (client_id, coupon_id) VALUES (p_client_id, p_coupon_id);
+  END IF;
+
+  -- 3. Calculate Expiry
   SELECT COALESCE(MAX(expiry_date), NOW()) INTO v_current_exp FROM client_subscriptions
     WHERE client_id = p_client_id AND is_active = TRUE;
     
   IF v_current_exp < NOW() THEN v_current_exp := NOW(); END IF;
   v_new_exp := v_current_exp + (v_plan.duration_days || ' days')::INTERVAL;
 
+  -- 4. Update Subscription
   UPDATE client_subscriptions 
   SET plan_id = p_plan_id, expiry_date = v_new_exp, is_trial = FALSE, coupon_id = p_coupon_id
   WHERE client_id = p_client_id;
 
-  v_amount := v_plan.price;
+  -- 5. Record Payment
+  v_amount := v_plan.price - v_discount;
+  IF v_amount < 0 THEN v_amount := 0; END IF;
+
   INSERT INTO payments (client_id, plan_id, amount, payment_mode, transaction_ref, payment_status)
   VALUES (p_client_id, p_plan_id, v_amount, p_payment_mode, p_transaction_ref, 'SUCCESS');
 
   RETURN v_new_exp;
 END;
 $$ LANGUAGE plpgsql;
+-- 7️⃣ Coupon System Tracking
+CREATE TABLE IF NOT EXISTS public.coupon_usage (
+    usage_id SERIAL PRIMARY KEY,
+    client_id INT REFERENCES public.clients(client_id),
+    coupon_id INT REFERENCES public.coupons(coupon_id),
+    used_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(client_id, coupon_id)
+);
 
 -- 8️⃣ Admin Users (Internal Team)
 CREATE TABLE IF NOT EXISTS public.admin_users (
@@ -188,15 +225,23 @@ CREATE TABLE IF NOT EXISTS public.admin_users (
     created_at     TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
--- 9️⃣ Audit Logs
-CREATE TABLE IF NOT EXISTS public.audit_logs (
-    log_id              SERIAL PRIMARY KEY,
-    performed_by_email  TEXT,
-    action_type         TEXT, -- 'RENEWAL', 'CONVERSION', 'DELETION'
-    description         TEXT,
-    entity_id           TEXT, -- client_id or lead_id
-    created_at          TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+-- 10️⃣ Merchant Gateways (Payment Keys)
+CREATE TABLE IF NOT EXISTS public.merchant_gateways (
+    gateway_id     SERIAL PRIMARY KEY,
+    gateway_name   TEXT NOT NULL, -- e.g., 'RAZORPAY'
+    key_id         TEXT NOT NULL,
+    key_secret     TEXT NOT NULL,
+    is_active      BOOLEAN DEFAULT TRUE,
+    created_at     TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at     TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
+
+-- Seed Razorpay Test Keys
+INSERT INTO public.merchant_gateways (gateway_name, key_id, key_secret)
+VALUES ('RAZORPAY', 'rzp_test_SvBDlz33nK8aoD', '9IRURXkYAkAI1bxgCGFhZlM5')
+ON CONFLICT DO NOTHING;
+
+-- 11️⃣ Audit Logs
 
 -- Update Leads table to link to Clients
 ALTER TABLE public.leads ADD COLUMN IF NOT EXISTS converted_client_id INT REFERENCES public.clients(client_id);
@@ -217,3 +262,6 @@ ON CONFLICT (email) DO NOTHING;
 GRANT ALL ON ALL TABLES IN SCHEMA public TO anon, authenticated, service_role;
 GRANT ALL ON ALL SEQUENCES IN SCHEMA public TO anon, authenticated, service_role;
 GRANT ALL ON ALL FUNCTIONS IN SCHEMA public TO anon, authenticated, service_role;
+
+-- Special fix for sequences if needed
+GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO anon, authenticated, service_role;
