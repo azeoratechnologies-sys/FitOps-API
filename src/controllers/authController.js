@@ -514,6 +514,24 @@ async function updateLastUsage(req, res) {
   }
 }
 
+async function getSupportConfig(req, res) {
+  try {
+    const { data, error } = await supabase
+      .from('system_config')
+      .select('config_value')
+      .eq('config_key', 'support_settings')
+      .single();
+
+    if (error && error.code !== 'PGRST116') throw error;
+    res.json(data ? data.config_value : {
+      whatsapp_no: '9030121486',
+      email: 'azeoratechnologies@gmail.com'
+    });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+}
+
 module.exports = {
   checkUnique,
   registerUser,
@@ -527,5 +545,6 @@ module.exports = {
   getClientSuggestions,
   getAllSuggestions,
   replyToSuggestion,
-  updateLastUsage
+  updateLastUsage,
+  getSupportConfig
 };
