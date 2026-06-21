@@ -5,6 +5,37 @@ const { sendRenewalEmail } = require('../config/emailService');
  * Payment Controller handles direct Subscription renewal after successful payment
  */
 
+/**
+ * @swagger
+ * /api/payments/renew:
+ *   post:
+ *     summary: Renew a client subscription after successful online payment
+ *     tags: [Payments]
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - clientId
+ *               - planId
+ *               - paymentId
+ *             properties:
+ *               clientId:
+ *                 type: integer
+ *               planId:
+ *                 type: integer
+ *               paymentId:
+ *                 type: string
+ *               couponId:
+ *                 type: integer
+ *     responses:
+ *       200:
+ *         description: Subscription renewed successfully
+ *       500:
+ *         description: Server error
+ */
 async function renewAfterPayment(req, res) {
   const { clientId, planId, paymentId, couponId } = req.body;
 
@@ -55,6 +86,20 @@ async function renewAfterPayment(req, res) {
   }
 }
 
+/**
+ * @swagger
+ * /api/payments/config:
+ *   get:
+ *     summary: Get payment configuration/keys
+ *     tags: [Payments]
+ *     responses:
+ *       200:
+ *         description: Config returned successfully
+ *       404:
+ *         description: Razorpay configuration not found
+ *       500:
+ *         description: Server error
+ */
 async function getPaymentConfig(req, res) {
   try {
     const { data: gateway, error } = await supabase
@@ -76,6 +121,36 @@ async function getPaymentConfig(req, res) {
   }
 }
 
+/**
+ * @swagger
+ * /api/payments/validate-coupon:
+ *   post:
+ *     summary: Validate a coupon code for a client
+ *     tags: [Payments]
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - couponCode
+ *               - clientId
+ *             properties:
+ *               couponCode:
+ *                 type: string
+ *               clientId:
+ *                 type: integer
+ *     responses:
+ *       200:
+ *         description: Coupon validated successfully
+ *       400:
+ *         description: Coupon expired, inactive, or already utilized
+ *       404:
+ *         description: Invalid coupon code
+ *       500:
+ *         description: Server error
+ */
 async function validateCoupon(req, res) {
   const { couponCode, clientId } = req.body;
   

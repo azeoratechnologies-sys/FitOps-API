@@ -45,7 +45,12 @@ CREATE TABLE IF NOT EXISTS public.clients (
     is_active       BOOLEAN DEFAULT TRUE,
     register_date   TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     expiry_date     TIMESTAMP,
-    deleted_at      TIMESTAMP
+    deleted_at      TIMESTAMP,
+    device_id       TEXT,
+    business_type   TEXT,
+    country_code    TEXT,
+    platform        TEXT,
+    app_version     TEXT
 );
 
 -- 4️⃣ Client Subscriptions
@@ -241,10 +246,37 @@ INSERT INTO public.merchant_gateways (gateway_name, key_id, key_secret)
 VALUES ('RAZORPAY', 'rzp_test_SvBDlz33nK8aoD', '9IRURXkYAkAI1bxgCGFhZlM5')
 ON CONFLICT DO NOTHING;
 
+-- 12️⃣ App Versions
+CREATE TABLE IF NOT EXISTS public.app_versions (
+    id SERIAL PRIMARY KEY,
+    platform TEXT UNIQUE NOT NULL,
+    latest_version TEXT NOT NULL,
+    last_version TEXT NOT NULL,
+    is_mandatory BOOLEAN DEFAULT FALSE,
+    download_url TEXT,
+    release_notes TEXT DEFAULT '',
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Seed Initial App Versions
+INSERT INTO public.app_versions (platform, latest_version, last_version, is_mandatory, download_url)
+VALUES 
+  ('android', '1.0.0', '1.0.0', false, 'https://play.google.com/store/apps/details?id=com.fitsuite.fitops'),
+  ('ios', '1.0.0', '1.0.0', false, 'https://apps.apple.com/app/fitops')
+ON CONFLICT (platform) DO NOTHING;
+
 -- 11️⃣ Audit Logs
 
 -- Update Leads table to link to Clients
 ALTER TABLE public.leads ADD COLUMN IF NOT EXISTS converted_client_id INT REFERENCES public.clients(client_id);
+
+-- Add release_notes to app_versions for existing databases
+ALTER TABLE public.app_versions ADD COLUMN IF NOT EXISTS release_notes TEXT DEFAULT '';
+
+-- Ensure clients table has required fields for app version and platform tracking
+ALTER TABLE public.clients ADD COLUMN IF NOT EXISTS platform TEXT;
+ALTER TABLE public.clients ADD COLUMN IF NOT EXISTS app_version TEXT;
 
 -- =============================================================
 -- SEED DATA

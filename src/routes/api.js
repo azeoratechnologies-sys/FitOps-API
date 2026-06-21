@@ -9,6 +9,7 @@ router.post('/register', authController.registerUser);
 router.post('/login', authController.loginUser);
 router.get('/config/country-rules', authController.getCountryRules);
 router.get('/config/support', authController.getSupportConfig);
+router.get('/config/versions/:platform', authController.getAppVersionByPlatform);
 router.get('/subscription/:clientId', authController.getSubscription);
 router.post('/admin/renew', authController.adminRenew);
 

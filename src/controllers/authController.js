@@ -97,7 +97,7 @@ async function registerUser(req, res) {
     businessName, storeName, gstTaxNumber,
     mobileNo, email, address, country,
     username, password, referralCode, deviceId,
-    businessType, countryCode
+    businessType, countryCode, platform, appVersion
   } = req.body;
 
   try {
@@ -139,7 +139,9 @@ async function registerUser(req, res) {
     const updatePayload = {
       business_type: businessType || 'Tailoring',
       country_code: countryCode || '+91',
-      device_id: deviceId
+      device_id: deviceId,
+      platform: platform,
+      app_version: appVersion
     };
 
     const { error: updateError } = await supabase
@@ -194,7 +196,7 @@ async function registerUser(req, res) {
  *         description: Login successful
  */
 async function loginUser(req, res) {
-  const { username, password, deviceId, platform } = req.body;
+  const { username, password, deviceId, platform, appVersion } = req.body;
   const ip = req.ip || req.headers['x-forwarded-for'];
 
   try {
@@ -246,10 +248,16 @@ async function loginUser(req, res) {
       device_id: deviceId
     });
 
-    // 5. Update Last Usage (Non-blocking)
+    // 5. Update Last Usage & Platform/Version details (Non-blocking)
     try {
+      const updatePayload = {
+        last_usage: new Date().toISOString()
+      };
+      if (platform) updatePayload.platform = platform;
+      if (appVersion) updatePayload.app_version = appVersion;
+
       await supabase.from('clients')
-        .update({ last_usage: new Date().toISOString() })
+        .update(updatePayload)
         .eq('client_id', user.client_id);
     } catch (uErr) {
       console.error('Failed to update last_usage during login:', uErr.message);
@@ -397,6 +405,24 @@ async function adminRenew(req, res) {
   }
 }
 
+/**
+ * @swagger
+ * /api/plans:
+ *   get:
+ *     summary: Retrieve active subscription plans
+ *     tags: [Plans]
+ *     parameters:
+ *       - in: query
+ *         name: country
+ *         schema:
+ *           type: string
+ *         description: Optional country name to filter plans
+ *     responses:
+ *       200:
+ *         description: Successfully retrieved active plans
+ *       500:
+ *         description: Server error
+ */
 async function getPlans(req, res) {
   const { country } = req.query;
   try {
@@ -419,6 +445,29 @@ async function getPlans(req, res) {
   }
 }
 
+/**
+ * @swagger
+ * /api/leads:
+ *   post:
+ *     summary: Create a new lead
+ *     tags: [Leads]
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               name: { type: string }
+ *               email: { type: string }
+ *               phone: { type: string }
+ *               message: { type: string }
+ *     responses:
+ *       200:
+ *         description: Lead created successfully
+ *       500:
+ *         description: Server error
+ */
 async function createLead(req, res) {
   try {
     const { data, error } = await supabase
@@ -435,6 +484,30 @@ async function createLead(req, res) {
 
 // --- Suggestions Logic ---
 
+/**
+ * @swagger
+ * /api/suggestions:
+ *   post:
+ *     summary: Submit a client suggestion/feedback
+ *     tags: [Suggestions]
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - clientId
+ *               - suggestionText
+ *             properties:
+ *               clientId: { type: integer }
+ *               suggestionText: { type: string }
+ *     responses:
+ *       200:
+ *         description: Suggestion submitted successfully
+ *       500:
+ *         description: Server error
+ */
 async function submitSuggestion(req, res) {
   try {
     const { clientId, suggestionText } = req.body;
@@ -450,6 +523,25 @@ async function submitSuggestion(req, res) {
   }
 }
 
+/**
+ * @swagger
+ * /api/suggestions/{clientId}:
+ *   get:
+ *     summary: Get suggestions submitted by a specific client
+ *     tags: [Suggestions]
+ *     parameters:
+ *       - in: path
+ *         name: clientId
+ *         required: true
+ *         schema:
+ *           type: integer
+ *         description: The unique ID of the client
+ *     responses:
+ *       200:
+ *         description: Successfully retrieved client suggestions
+ *       500:
+ *         description: Server error
+ */
 async function getClientSuggestions(req, res) {
   try {
     const { clientId } = req.params;
@@ -466,6 +558,18 @@ async function getClientSuggestions(req, res) {
   }
 }
 
+/**
+ * @swagger
+ * /api/admin/suggestions:
+ *   get:
+ *     summary: Get all suggestions/feedbacks (Admin Only)
+ *     tags: [Admin]
+ *     responses:
+ *       200:
+ *         description: Successfully retrieved all suggestions
+ *       500:
+ *         description: Server error
+ */
 async function getAllSuggestions(req, res) {
   try {
     const { data, error } = await supabase
@@ -480,6 +584,35 @@ async function getAllSuggestions(req, res) {
   }
 }
 
+/**
+ * @swagger
+ * /api/admin/suggestions/{id}/reply:
+ *   post:
+ *     summary: Reply to a client suggestion (Admin Only)
+ *     tags: [Admin]
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: integer
+ *         description: The suggestion ID
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - replyText
+ *             properties:
+ *               replyText: { type: string }
+ *     responses:
+ *       200:
+ *         description: Reply sent successfully
+ *       500:
+ *         description: Server error
+ */
 async function replyToSuggestion(req, res) {
   try {
     const { id } = req.params;
@@ -501,11 +634,38 @@ async function replyToSuggestion(req, res) {
   }
 }
 
+/**
+ * @swagger
+ * /api/clients/{id}/last-usage:
+ *   post:
+ *     summary: Manually update last usage timestamp for a client
+ *     tags: [Admin]
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: integer
+ *         description: The client ID
+ *     responses:
+ *       200:
+ *         description: Timestamp updated successfully
+ *       500:
+ *         description: Server error
+ */
 async function updateLastUsage(req, res) {
   try {
     const { id } = req.params;
+    const { platform, appVersion } = req.body;
+
+    const updatePayload = {
+      last_usage: new Date().toISOString()
+    };
+    if (platform) updatePayload.platform = platform;
+    if (appVersion) updatePayload.app_version = appVersion;
+
     await supabase.from('clients')
-      .update({ last_usage: new Date().toISOString() })
+      .update(updatePayload)
       .eq('client_id', id);
     res.json({ success: true });
   } catch (error) {
@@ -514,6 +674,18 @@ async function updateLastUsage(req, res) {
   }
 }
 
+/**
+ * @swagger
+ * /api/config/support:
+ *   get:
+ *     summary: Get system support settings (WhatsApp number and Email)
+ *     tags: [Config]
+ *     responses:
+ *       200:
+ *         description: Support configuration retrieved successfully
+ *       500:
+ *         description: Server error
+ */
 async function getSupportConfig(req, res) {
   try {
     const { data, error } = await supabase
@@ -527,6 +699,24 @@ async function getSupportConfig(req, res) {
       whatsapp_no: '9030121486',
       email: 'azeoratechnologies@gmail.com'
     });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+}
+
+async function getAppVersionByPlatform(req, res) {
+  try {
+    const { platform } = req.params;
+    const { data, error } = await supabase
+      .from('app_versions')
+      .select('*')
+      .eq('platform', platform.toLowerCase())
+      .single();
+
+    if (error) {
+      return res.status(404).json({ error: `Version config for platform '${platform}' not found` });
+    }
+    res.json(data);
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
@@ -546,5 +736,6 @@ module.exports = {
   getAllSuggestions,
   replyToSuggestion,
   updateLastUsage,
-  getSupportConfig
+  getSupportConfig,
+  getAppVersionByPlatform
 };
